@@ -15,6 +15,7 @@ const User = require("./models/usermodel");
 // const Settings = require("./models/smssettingsmodal");
 const smsSettings = require("./models/smssettingsmodal");
 const callSettings = require("./models/callsettingsmodel");
+const callDaysSettings = require("./models/dayscountermodal");
 //app and port
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -56,10 +57,11 @@ app.get("/", (req, res) => {
   console.log("Root route accessed");
 });
 
-
+//admin login route
 app.post("/admin-login", async (req, res) => {
   userLogin(req, res);
 });
+
 
 app.post("/add-user", async (req, res) => {
   try {
@@ -118,6 +120,24 @@ app.get("/users", async (req, res) => {
   }
 });
 
+const updateCallDaysSettings = async () => {
+  try {
+    const count = await smsSettings.countDocuments();
+    let existingSetting = await callDaysSettings.findOne({});
+    if (existingSetting) {
+      existingSetting.numberOfDaysToCalls = count;
+      await existingSetting.save();
+    } else {
+      const newSetting = new callDaysSettings({
+        numberOfDaysToCalls: count,
+      });
+      await newSetting.save();
+    }
+    // console.log(`${count}`);
+  } catch (error) {
+    console.error(error);
+  }
+};
 
 app.post("/api/add-sms", async (req, res) => {
   try {
@@ -129,6 +149,8 @@ app.post("/api/add-sms", async (req, res) => {
       // numberOfDays,
     });
     await newSettings.save();
+    await updateCallDaysSettings(); 
+
     // console.log(newSettings);
     res.status(201).json({
       status: "success",
@@ -155,6 +177,8 @@ app.get("/api/sms", async (req, res) => {
       message: "Twilio Settings fetched successfully",
       Settings: users,
     });
+    await updateCallDaysSettings(); 
+
   } catch (error) {
     // console.error("Error fetching users:", error);
     res.status(500).json({
@@ -232,6 +256,11 @@ app.get("/api/call", async (req, res) => {
     });
   }
 });
+
+
+
+
+
 
 // app.post("/log-data", (req, res) => {
 //   console.log("Received data:", req.body);
