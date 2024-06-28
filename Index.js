@@ -61,27 +61,51 @@ app.post("/admin-login", async (req, res) => {
 app.post("/add-user", async (req, res) => {
   try {
     const { phone, status } = req.body;
-    const newUser = new User({
-      phone,
-      status,
-    });
-    await newUser.save();
-    console.log(newUser),
-    res.status(201).json({
-      status: "success",
-      success: true,
-      message: "User added successfully",
-      data: newUser,
-    });
+
+    let existingUser = await User.findOne({ phone });
+
+    if (existingUser) {
+      existingUser.status = status;
+      existingUser.numberOfCall += 1; 
+      existingUser.date = Date.now(); 
+      await existingUser.save();
+
+      res.status(200).json({
+        status: "success",
+        success: true,
+        message: "User updated successfully",
+        data: existingUser,
+      });
+    } else {
+      const newUser = new User({
+        phone,
+        status,
+      });
+
+      await newUser.save();
+
+      res.status(201).json({
+        status: "success",
+        success: true,
+        message: "User added successfully",
+        data: newUser,
+      });
+    }
   } catch (error) {
-    console.log(error),
+    console.log(error);
     res.status(500).json({
       status: "error",
       error: error.message,
-      message: "Failed to add user",
+      message: "Failed to add/update user",
     });
   }
 });
+
+
+
+
+
+
 
 
 app.get("/users", async (req, res) => {
