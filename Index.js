@@ -23,6 +23,9 @@ const PORT = process.env.PORT || 8000;
 //db connection
 connectDB();
 
+
+
+////
 app.use(
   cors({
     origin: [
@@ -56,6 +59,145 @@ app.get("/", (req, res) => {
   });
   console.log("Root route accessed");
 });
+
+
+const accountSid = process.env.TWILIO_ACCOUNT_SID;
+const authToken = process.env.TWILIO_AUTH_TOKEN;
+const client = twilio(accountSid, authToken);
+
+
+// const getUserPhone = async (req, res) => {
+//   try {
+//     const users = await User.find({ status: "Pending" }, "phone -_id");
+//     const phoneNumbers = users.map(user => user.phone);
+//     res.status(200).json({
+//       status: "success",
+//       phoneNumbers: phoneNumbers,
+//     });
+//     console.log(phoneNumbers);
+//   } catch (error) {
+//     console.error("Error fetching phone numbers:", error);
+//     res.status(500).json({
+//       status: "error",
+//       message: "Failed to fetch phone numbers",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
+// app.get("/numbers", async (req, res) => {
+//   try {
+//     const users = await User.find({ status: "Pending" }, "phone -_id");
+//     const phoneNumbers = users.map(user => user.phone);
+//     res.status(200).json({
+//       status: "success",
+//       phoneNumbers: phoneNumbers,
+//     });
+//     console.log(phoneNumbers);
+//   } catch (error) {
+//     console.error("Error fetching phone numbers:", error);
+//     res.status(500).json({
+//       status: "error",
+//       message: "Failed to fetch phone numbers",
+//       error: error.message,
+//     });
+//   }
+// })
+
+app.post("/api/make-call", async (req, res) => {
+  // await getUserPhone();
+  const { to } = req.body;
+  if (!to) {
+    return res.status(400).json({
+      status: "error",
+      message: "Destination phone number is required",
+    });
+  }
+
+  try {
+    const call = await client.calls.create({
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: to,
+      url: "http://demo.twilio.com/docs/voice.xml",
+      method: "GET",
+      statusCallback: "https://www.myapp.com/events",
+      statusCallbackMethod: "POST",
+    });
+    const callDetails = await client.calls(call.sid).fetch();
+    console.log(callDetails);
+
+    res.status(200).json({
+      status: "success",
+      message: "Call initiated successfully",
+      callSid: call.sid,
+      callDetails: callDetails,
+    });
+  } catch (error) {
+    console.error("Error making call:", error);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to make the call",
+      error: error.message,
+    });
+  }
+});
+
+
+
+// const getUserPhone = async (req, res) => {
+//   try {
+//     const users = await User.find({ status: "Pending" }, "phone -_id");
+//     const phoneNumbers = users.map(user => user.phone);
+//     res.status(200).json({
+//       status: "success",
+//       phoneNumbers: phoneNumbers,
+//     });
+//     console.log(phoneNumbers);
+//   } catch (error) {
+//     console.error("Error fetching phone numbers:", error);
+//     res.status(500).json({
+//       status: "error",
+//       message: "Failed to fetch phone numbers",
+//       error: error.message,
+//     });
+//   }
+// };
+// app.post("/api/make-call", async (req, res) => {
+//   try {
+//     const phoneNumbers = await getUserPhone();
+//     console.log(phoneNumbers);
+//     const to = phoneNumbers[0] || req.body.to;
+//     if (!to) {
+//       return res.status(400).json({
+//         status: "error",
+//         message: "Destination phone number is required",
+//       });
+//     }
+
+//     const call = await client.calls.create({
+//       from: process.env.TWILIO_PHONE_NUMBER,
+//       to: to,
+//       url: "http://demo.twilio.com/docs/voice.xml",
+//       method: "GET",
+//       statusCallback: "https://www.myapp.com/events",
+//       statusCallbackMethod: "POST",
+//     });
+
+//     res.status(200).json({
+//       status: "success",
+//       message: "Call initiated successfully",
+//       callSid: call.sid,
+//     });
+//   } catch (error) {
+//     console.error("Error making call:", error);
+//     res.status(500).json({
+//       status: "error",
+//       message: "Failed to make the call",
+//       error: error.message,
+//     });
+//   }
+// });
 
 //admin login route
 app.post("/admin-login", async (req, res) => {
@@ -149,7 +291,7 @@ app.post("/api/add-sms", async (req, res) => {
       // numberOfDays,
     });
     await newSettings.save();
-    await updateCallDaysSettings(); 
+    await updateCallDaysSettings();
 
     // console.log(newSettings);
     res.status(201).json({
@@ -177,7 +319,7 @@ app.get("/api/sms", async (req, res) => {
       message: "Twilio Settings fetched successfully",
       Settings: users,
     });
-    await updateCallDaysSettings(); 
+    await updateCallDaysSettings();
 
   } catch (error) {
     // console.error("Error fetching users:", error);
