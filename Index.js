@@ -12,7 +12,9 @@ const {
 } = require("./middlewares/authmiddleware");
 const { userLogin } = require("./userroutes/userlogin");
 const User = require("./models/usermodel");
-const Settings = require("./models/settingsmodal");
+// const Settings = require("./models/smssettingsmodal");
+const smsSettings = require("./models/smssettingsmodal");
+const callSettings = require("./models/callsettingsmodel");
 //app and port
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -24,10 +26,10 @@ app.use(
   cors({
     origin: [
       "*",
-      // "https://zap70.com",
-      // "http://localhost:3000",
-      // "http://167.71.95.212:3000",
-      // "http://165.232.134.133:3000",
+      "https://zap70.com",
+      "http://localhost:3000",
+      "http://167.71.95.212:3000",
+      "http://165.232.134.133:3000",
     ],
     credentials: true,
   })
@@ -116,24 +118,15 @@ app.get("/users", async (req, res) => {
   }
 });
 
-app.post("/log-data", (req, res) => {
-  console.log("Received data:", req.body);
-  res.status(200).json({
-    status: "success",
-    success: true,
-    message: "Data received and logged successfully",
-    data: req.body,
-  });
-});
 
-app.post("/change-settings", async (req, res) => {
+app.post("/api/add-sms", async (req, res) => {
   try {
-    const { textMessage, numberOfUsers, numberOfCalls } = req.body;
-    await Settings.findOneAndDelete({});
-    const newSettings = new Settings({
+    const { textMessage } = req.body;
+    // await Settings.findOneAndDelete({});
+    const newSettings = new smsSettings({
       textMessage,
-      numberOfUsers,
-      numberOfCalls,
+      // numberOfUsers,
+      // numberOfDays,
     });
     await newSettings.save();
     // console.log(newSettings);
@@ -153,9 +146,9 @@ app.post("/change-settings", async (req, res) => {
   }
 });
 
-app.get("/settings", async (req, res) => {
+app.get("/api/sms", async (req, res) => {
   try {
-    const users = await Settings.find();
+    const users = await smsSettings.find();
     res.status(200).json({
       status: "success",
       success: true,
@@ -172,7 +165,83 @@ app.get("/settings", async (req, res) => {
   }
 });
 
+app.delete("/api/sms/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const deletedSetting = await smsSettings.findByIdAndDelete(id);
+    if (!deletedSetting) {
+      return res.status(404).json({
+        status: "error",
+        message: "SMS not found",
+      });
+    }
+    res.status(200).json({
+      status: "success",
+      message: "SMS deleted successfully",
+      // deletedSetting: deletedSetting,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      error: error.message,
+      message: "Failed to delete SMS",
+    });
+  }
+});
 
+app.post("/api/add-call", async (req, res) => {
+  try {
+    const { numberOfCallsPerHour } = req.body;
+    await callSettings.findOneAndDelete({});
+    const newSettings = new callSettings({
+      numberOfCallsPerHour,
+    });
+    await newSettings.save();
+    // console.log(newSettings);
+    res.status(201).json({
+      status: "success",
+      success: true,
+      message: "Number of calls added successfully",
+      data: newSettings,
+    });
+  } catch (error) {
+    // console.log(error);
+    res.status(500).json({
+      status: "error",
+      error: error.message,
+      message: "Failed to add Number of calls",
+    });
+  }
+});
+
+app.get("/api/call", async (req, res) => {
+  try {
+    const users = await callSettings.find();
+    res.status(200).json({
+      status: "success",
+      success: true,
+      message: "Twilio Call Settings fetched successfully",
+      Settings: users,
+    });
+  } catch (error) {
+    // console.error("Error fetching users:", error);
+    res.status(500).json({
+      status: "error",
+      error: error.message,
+      message: "Failed to fetch call Settings",
+    });
+  }
+});
+
+// app.post("/log-data", (req, res) => {
+//   console.log("Received data:", req.body);
+//   res.status(200).json({
+//     status: "success",
+//     success: true,
+//     message: "Data received and logged successfully",
+//     data: req.body,
+//   });
+// });
 //server
 app.listen(PORT, () => {
   console.log("==================================");
