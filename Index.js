@@ -72,7 +72,10 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = twilio(accountSid, authToken);
 
 
-
+const twilioClient = twilio(
+  process.env.TWILIO_ACCOUNT_SID,
+  process.env.TWILIO_AUTH_TOKEN
+);
 
 
 
@@ -135,23 +138,54 @@ const getUserPhone = async (numberOfUsers) => {
   }
 };
 
+app.post("/send-sms", async (req, res) => {
+  const { toNumber } = req.body;
+
+  try {
+    // const currentDay = moment().startOf('day');
+    const settings = await smsSettings.findOne({ days: 4 });
+    if (!settings) {
+      throw new Error(`SMS not found for day ${currentDay}`);
+    }
+    const smsMessage = await twilioClient.messages.create({
+      body: settings.textMessage,
+      from: process.env.TWILIO_PHONE_NUMBER,
+      to: toNumber
+    });
+    console.log(`SMS sent to ${toNumber}:`, smsMessage.sid);
+    res.status(200).json({
+      status: "success",
+      message: `SMS sent successfully to ${toNumber}`,
+      data: smsMessage,
+    });
+  } catch (error) {
+    console.error(`Failed to send SMS to ${toNumber}:`, error);
+    res.status(500).json({
+      status: "error",
+      message: `Failed to send SMS to ${toNumber}`,
+      error: error.message,
+    });
+  }
+});
 
 app.post("/callstatus", async (req, res) => {
   const callStatus = req.body.CallStatus;
   const toNumber = req.body.To;
 
-  if (callStatus === "in-progress") {
+  if (CallStatus === "in-progress") {
+    await User.updateOne({ phone: toNumber }, { $set: { status: "Answered" } });
+    console.log(`Updated status to Answered for user with phone number ${toNumber}`);
   } else if (["no-answer", "busy", "failed", "canceled"].includes(callStatus)) {
     try {
       await User.updateOne({ phone: toNumber }, { $inc: { numberOfCall: 1 } });
       console.log(`Incremented number of calls for user with phone number ${toNumber}`);
       const currentDay = moment().startOf('day');
-      const settings = await smsSettings.findOne({ days: currentDay });
+      const smsToSend = await smsSettings.findOne({ days: currentDay });
       if (!settings) {
-        throw new Error(`SMS settings not found for day ${currentDay}`);
+        throw new Error(`SMS not found for day ${currentDay}`);
       }
       const smsMessage = await twilioClient.messages.create({
-        body: settings.textMessage,
+        body: smsToSend.textMessage,
         from: process.env.TWILIO_PHONE_NUMBER,
         to: toNumber
       });
@@ -208,7 +242,7 @@ app.post("/api/make-call", async (req, res) => {
           status: "skipped",
           message: "User has already been called today",
         });
-        continue; 
+        continue;
       }
 
       if (currentHourET < 9 || currentHourET >= 17) {
@@ -429,7 +463,7 @@ app.post("/api/add-sms", async (req, res) => {
     const count = await smsSettings.countDocuments();
     const newSettings = new smsSettings({
       textMessage,
-      days : count + 1, 
+      days: count + 1,
     });
     await newSettings.save();
     res.status(201).json({
@@ -446,6 +480,35 @@ app.post("/api/add-sms", async (req, res) => {
     });
   }
 });
+
+app.put("/api/update-sms/:id", async (req, res) => {
+  const { id } = req.params;
+  const { textMessage } = req.body;
+  try {
+    let settings = await smsSettings.findById(id);
+    if (!settings) {
+      return res.status(404).json({
+        status: "error",
+        message: "SMS settings not found",
+      });
+    }
+    settings.textMessage = textMessage;
+    await settings.save();
+
+    res.status(200).json({
+      status: "success",
+      message: "SMS settings updated successfully",
+      data: settings,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      error: error.message,
+      message: "Failed to update SMS settings",
+    });
+  }
+});
+
 app.get("/api/sms", async (req, res) => {
   try {
     const users = await smsSettings.find();
