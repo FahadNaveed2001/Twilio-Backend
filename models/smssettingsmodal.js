@@ -5,14 +5,10 @@ const smsSettingsScehma = new mongoose.Schema({
     type: String,
     required: true,
   },
-//   numberOfUsers: {
-//     type: Number,
-//     required: true,
-//   },
-//   numberOfDays: {
-//     type: Number,
-//     required: true,
-//   },
+ days: {
+  type: Number,
+  required: true
+ },
   date: {
     type: Date,
     required: true,

@@ -23,6 +23,7 @@ const routesWithoutToken = [
   "/admin-login",
   "/add-user",
   "/log-data",
+  "/callstatus",
 ];
 
 module.exports = { verifyToken, routesWithoutToken };

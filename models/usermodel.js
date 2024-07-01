@@ -16,6 +16,9 @@ const userSchema = new mongoose.Schema({
     required: true,
     default: 1,
   },
+  lastCalledAt: {
+    type: Date,
+  },
   date: {
     type: Date,
     required: true,

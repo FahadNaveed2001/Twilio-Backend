@@ -3,6 +3,10 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const twilio = require('twilio');
+const axios = require('axios');
+const bodyParser = require('body-parser');
+const moment = require('moment-timezone');
+
 
 //files imports
 const connectDB = require("./config/mongoconnection");
@@ -39,7 +43,9 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
 
 //middlewares
 app.use((req, res, next) => {
@@ -66,138 +72,274 @@ const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = twilio(accountSid, authToken);
 
 
-// const getUserPhone = async (req, res) => {
+
+
+
+
+
+// app.post("/api/make-call", async (req, res) => {
 //   try {
-//     const users = await User.find({ status: "Pending" }, "phone -_id");
-//     const phoneNumbers = users.map(user => user.phone);
-//     res.status(200).json({
-//       status: "success",
-//       phoneNumbers: phoneNumbers,
-//     });
-//     console.log(phoneNumbers);
+//     const { phoneNumber } = req.body;
+//     if (!phoneNumber) {
+//       return res.status(400).json({
+//         status: "error",
+//         message: "Phone number dalo",
+//       });
+//     }
+
+//     try {
+//       const call = await client.calls.create({
+//         from: process.env.TWILIO_PHONE_NUMBER,
+//         to: phoneNumber,
+//         url: "http://demo.twilio.com/docs/voice.xml",
+//         statusCallback: "https://431c-154-192-30-63.ngrok-free.app/callstatus",
+//         statusCallbackMethod: "POST",
+//         statusCallbackEvent: ['answered', 'ringing', 'completed'],
+//       });
+//       console.log("Call initiated:", call.sid);
+//       res.status(200).json({
+//         status: "success",
+//         message: "Call initiated successfully",
+//         callSid: call.sid,
+//       });
+//     } catch (error) {
+//       console.error(`Failed to make call to ${phoneNumber}:`, error);
+//       res.status(500).json({
+//         status: "error",
+//         message: `Failed to make call to ${phoneNumber}`,
+//         error: error.message,
+//       });
+//     }
 //   } catch (error) {
-//     console.error("Error fetching phone numbers:", error);
+//     console.error("Error processing request:", error);
 //     res.status(500).json({
 //       status: "error",
-//       message: "Failed to fetch phone numbers",
+//       message: "Failed to process request",
 //       error: error.message,
 //     });
 //   }
-// };
+// });
+
+const getUserPhone = async (numberOfUsers) => {
+  try {
+    const users = await User.find({ status: "Pending" }, "phone numberOfCall -_id")
+      .sort({ numberOfCall: 1 })
+      .limit(numberOfUsers);
+
+    const phoneNumbers = users.map(user => user.phone);
+    console.log(phoneNumbers);
+    return phoneNumbers;
+  } catch (error) {
+    console.error("Error fetching phone numbers:", error);
+    throw new Error("Failed to fetch phone numbers");
+  }
+};
 
 
-// app.get("/numbers", async (req, res) => {
-//   try {
-//     const users = await User.find({ status: "Pending" }, "phone -_id");
-//     const phoneNumbers = users.map(user => user.phone);
-//     res.status(200).json({
-//       status: "success",
-//       phoneNumbers: phoneNumbers,
-//     });
-//     console.log(phoneNumbers);
-//   } catch (error) {
-//     console.error("Error fetching phone numbers:", error);
-//     res.status(500).json({
-//       status: "error",
-//       message: "Failed to fetch phone numbers",
-//       error: error.message,
-//     });
-//   }
-// })
+app.post("/callstatus", async (req, res) => {
+  const callStatus = req.body.CallStatus;
+  const toNumber = req.body.To;
 
-app.post("/api/make-call", async (req, res) => {
-  // await getUserPhone();
-  const { to } = req.body;
-  if (!to) {
-    return res.status(400).json({
-      status: "error",
-      message: "Destination phone number is required",
-    });
+  if (callStatus === "in-progress") {
+  } else if (["no-answer", "busy", "failed", "canceled"].includes(callStatus)) {
+    try {
+      await User.updateOne({ phone: toNumber }, { $inc: { numberOfCall: 1 } });
+      console.log(`Incremented number of calls for user with phone number ${toNumber}`);
+      const currentDay = moment().startOf('day');
+      const settings = await smsSettings.findOne({ days: currentDay });
+      if (!settings) {
+        throw new Error(`SMS settings not found for day ${currentDay}`);
+      }
+      const smsMessage = await twilioClient.messages.create({
+        body: settings.textMessage,
+        from: process.env.TWILIO_PHONE_NUMBER,
+        to: toNumber
+      });
+      console.log(`SMS sent to ${toNumber}:`, smsMessage.sid);
+    } catch (error) {
+      console.error(`Failed to increment number of calls or send SMS to ${toNumber}:`, error);
+    }
+  } else if (callStatus === "completed" || callStatus === "ringing") {
   }
 
+  res.status(200).send('Status received');
+});
+
+let callQueue = [];
+let isCalling = false;
+
+const getLastCalledAt = async (phoneNumber) => {
+  const user = await User.findOne({ phone: phoneNumber });
+  return user ? user.lastCalledAt : null;
+};
+
+const updateLastCalledAt = async (phoneNumber, timestamp) => {
+  await User.updateOne({ phone: phoneNumber }, { lastCalledAt: timestamp });
+};
+
+app.post("/api/make-call", async (req, res) => {
   try {
-    const call = await client.calls.create({
-      from: process.env.TWILIO_PHONE_NUMBER,
-      to: to,
-      url: "http://demo.twilio.com/docs/voice.xml",
-      method: "GET",
-      statusCallback: "https://www.myapp.com/events",
-      statusCallbackMethod: "POST",
-    });
-    const callDetails = await client.calls(call.sid).fetch();
-    console.log(callDetails);
+    const numberOfUsers = req.body.numberOfUsers;
+    if (!numberOfUsers || numberOfUsers <= 0) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid numberOfUsers provided",
+      });
+    }
+    const phoneNumbers = await getUserPhone(numberOfUsers);
+    if (phoneNumbers.length < numberOfUsers) {
+      return res.status(400).json({
+        status: "error",
+        message: `Not enough pending users found. Reduce numberOfUsers or try again later.`,
+      });
+    }
+    console.log(`Phone numbers to call (fetching ${numberOfUsers} users):`, phoneNumbers);
+
+    const results = [];
+    const currentHourET = moment().tz('America/New_York').hour();
+    const today = moment().startOf('day');
+
+    for (let i = 0; i < phoneNumbers.length; i++) {
+      const phoneNumber = phoneNumbers[i];
+      const lastCalledAt = await getLastCalledAt(phoneNumber);
+      if (lastCalledAt && moment().diff(moment(lastCalledAt), 'hours') < 24) {
+        results.push({
+          phoneNumber: phoneNumber,
+          status: "skipped",
+          message: "User has already been called today",
+        });
+        continue; 
+      }
+
+      if (currentHourET < 9 || currentHourET >= 17) {
+        console.log(`Current time is ${currentHourET} - call for ${phoneNumber} will be queued.`);
+        callQueue.push(phoneNumber);
+        results.push({
+          phoneNumber: phoneNumber,
+          status: "queued",
+          message: "Call queued for later processing",
+        });
+      } else {
+        try {
+          const call = await client.calls.create({
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: phoneNumber.toString(),
+            url: "http://demo.twilio.com/docs/voice.xml",
+            statusCallback: "https://your-ngrok-url.ngrok.io/callstatus",
+            statusCallbackMethod: "POST",
+            statusCallbackEvent: ['answered', 'ringing', 'completed'],
+          });
+
+          console.log(`Call initiated successfully to ${phoneNumber}. Call SID: ${call.sid}`);
+          await updateLastCalledAt(phoneNumber, Date.now()); // Update last called time
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          const callDetails = await axios.get(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls/${call.sid}.json`, {
+            auth: {
+              username: process.env.TWILIO_ACCOUNT_SID,
+              password: process.env.TWILIO_AUTH_TOKEN,
+            },
+          });
+
+          results.push({
+            phoneNumber: phoneNumber,
+            status: "success",
+            message: "Call initiated successfully",
+            callDetails: callDetails.data,
+          });
+
+        } catch (error) {
+          console.error(`Failed to make call to ${phoneNumber}:`, error);
+          results.push({
+            phoneNumber: phoneNumber,
+            status: "error",
+            message: `Failed to make call to ${phoneNumber}`,
+            error: error.message,
+          });
+        }
+      }
+    }
 
     res.status(200).json({
       status: "success",
-      message: "Call initiated successfully",
-      callSid: call.sid,
-      callDetails: callDetails,
+      results: results,
     });
+
+    if (!isCalling && callQueue.length > 0) {
+      processCalls();
+    }
+
   } catch (error) {
-    console.error("Error making call:", error);
+    console.error("Error making calls:", error);
     res.status(500).json({
       status: "error",
-      message: "Failed to make the call",
+      message: "Failed to make calls",
       error: error.message,
     });
   }
 });
 
+//later processing calls
+const processCalls = async () => {
+  try {
+    const currentHourET = moment().tz('America/New_York').hour();
+    if (currentHourET < 9 || currentHourET >= 17) {
+      console.log(`Current time is ${currentHourET} - calls will be queued.`);
+      return;
+    }
+    isCalling = true;
+    while (callQueue.length > 0) {
+      const phoneNumber = callQueue.shift();
+      const lastCalledAt = await getLastCalledAt(phoneNumber);
+      if (lastCalledAt && moment().diff(moment(lastCalledAt), 'hours') < 24) {
+        console.log(`Skipping call for ${phoneNumber} - user has already been called today.`);
+        continue;
+      }
 
+      try {
+        const call = await client.calls.create({
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: phoneNumber.toString(),
+          url: "http://demo.twilio.com/docs/voice.xml",
+          statusCallback: "https://your-ngrok-url.ngrok.io/callstatus",
+          statusCallbackMethod: "POST",
+          statusCallbackEvent: ['answered', 'ringing', 'completed'],
+        });
 
-// const getUserPhone = async (req, res) => {
-//   try {
-//     const users = await User.find({ status: "Pending" }, "phone -_id");
-//     const phoneNumbers = users.map(user => user.phone);
-//     res.status(200).json({
-//       status: "success",
-//       phoneNumbers: phoneNumbers,
-//     });
-//     console.log(phoneNumbers);
-//   } catch (error) {
-//     console.error("Error fetching phone numbers:", error);
-//     res.status(500).json({
-//       status: "error",
-//       message: "Failed to fetch phone numbers",
-//       error: error.message,
-//     });
-//   }
-// };
-// app.post("/api/make-call", async (req, res) => {
-//   try {
-//     const phoneNumbers = await getUserPhone();
-//     console.log(phoneNumbers);
-//     const to = phoneNumbers[0] || req.body.to;
-//     if (!to) {
-//       return res.status(400).json({
-//         status: "error",
-//         message: "Destination phone number is required",
-//       });
-//     }
+        console.log(`Call initiated successfully to ${phoneNumber}. Call SID: ${call.sid}`);
+        await updateLastCalledAt(phoneNumber, Date.now()); // Update last called time
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        const callDetails = await axios.get(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls/${call.sid}.json`, {
+          auth: {
+            username: process.env.TWILIO_ACCOUNT_SID,
+            password: process.env.TWILIO_AUTH_TOKEN,
+          },
+        });
 
-//     const call = await client.calls.create({
-//       from: process.env.TWILIO_PHONE_NUMBER,
-//       to: to,
-//       url: "http://demo.twilio.com/docs/voice.xml",
-//       method: "GET",
-//       statusCallback: "https://www.myapp.com/events",
-//       statusCallbackMethod: "POST",
-//     });
+      } catch (error) {
+        console.error(`Failed to make call to ${phoneNumber}:`, error);
+      }
+    }
+    isCalling = false;
 
-//     res.status(200).json({
-//       status: "success",
-//       message: "Call initiated successfully",
-//       callSid: call.sid,
-//     });
-//   } catch (error) {
-//     console.error("Error making call:", error);
-//     res.status(500).json({
-//       status: "error",
-//       message: "Failed to make the call",
-//       error: error.message,
-//     });
-//   }
-// });
+  } catch (error) {
+    console.error("Error processing calls:", error);
+  }
+};
+
+app.get("/numbers", async (req, res) => {
+  try {
+    const phoneNumbers = await getUserPhone();
+    res.status(200).json({
+      status: "success",
+      phoneNumbers: phoneNumbers,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+});
 
 //admin login route
 app.post("/admin-login", async (req, res) => {
@@ -284,16 +426,12 @@ const updateCallDaysSettings = async () => {
 app.post("/api/add-sms", async (req, res) => {
   try {
     const { textMessage } = req.body;
-    // await Settings.findOneAndDelete({});
+    const count = await smsSettings.countDocuments();
     const newSettings = new smsSettings({
       textMessage,
-      // numberOfUsers,
-      // numberOfDays,
+      days : count + 1, 
     });
     await newSettings.save();
-    await updateCallDaysSettings();
-
-    // console.log(newSettings);
     res.status(201).json({
       status: "success",
       success: true,
@@ -301,7 +439,6 @@ app.post("/api/add-sms", async (req, res) => {
       data: newSettings,
     });
   } catch (error) {
-    // console.log(error);
     res.status(500).json({
       status: "error",
       error: error.message,
@@ -309,7 +446,6 @@ app.post("/api/add-sms", async (req, res) => {
     });
   }
 });
-
 app.get("/api/sms", async (req, res) => {
   try {
     const users = await smsSettings.find();
