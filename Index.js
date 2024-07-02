@@ -172,17 +172,22 @@ app.post("/callstatus", async (req, res) => {
   const callStatus = req.body.CallStatus;
   const toNumber = req.body.To;
 
-  if (CallStatus === "in-progress") {
+  if (["in-progress", "answered"].includes(callStatus)) {
     await User.updateOne({ phone: toNumber }, { $set: { status: "Answered" } });
     console.log(`Updated status to Answered for user with phone number ${toNumber}`);
   } else if (["no-answer", "busy", "failed", "canceled"].includes(callStatus)) {
     try {
-      await User.updateOne({ phone: toNumber }, { $inc: { numberOfCall: 1 } });
+      const updatedUser = await User.findOneAndUpdate(
+        { phone: toNumber },
+        { $inc: { numberOfCall: 1 } },
+        { new: true } 
+      );
       console.log(`Incremented number of calls for user with phone number ${toNumber}`);
-      const currentDay = moment().startOf('day');
-      const smsToSend = await smsSettings.findOne({ days: currentDay });
-      if (!settings) {
-        throw new Error(`SMS not found for day ${currentDay}`);
+      const smsToSend = await smsSettings.findOne({ days: updatedUser.numberOfCall });
+      if (!smsToSend) {
+        await User.updateOne({ phone: toNumber }, { $set: { status: "Failed" } });
+        console.log(`No SMS settings found for day ${updatedUser.numberOfCall}. Updated status to Failed for user with phone number ${toNumber}`);
+        throw new Error(`No SMS settings found for day ${updatedUser.numberOfCall}`);
       }
       const smsMessage = await twilioClient.messages.create({
         body: smsToSend.textMessage,
@@ -190,14 +195,16 @@ app.post("/callstatus", async (req, res) => {
         to: toNumber
       });
       console.log(`SMS sent to ${toNumber}:`, smsMessage.sid);
+
     } catch (error) {
       console.error(`Failed to increment number of calls or send SMS to ${toNumber}:`, error);
     }
   } else if (callStatus === "completed" || callStatus === "ringing") {
   }
 
-  res.status(200).send('Status received');
+  res.status(200).send('Status received and completed task');
 });
+
 
 let callQueue = [];
 let isCalling = false;
@@ -259,13 +266,13 @@ app.post("/api/make-call", async (req, res) => {
             from: process.env.TWILIO_PHONE_NUMBER,
             to: phoneNumber.toString(),
             url: "http://demo.twilio.com/docs/voice.xml",
-            statusCallback: "https://your-ngrok-url.ngrok.io/callstatus",
+            statusCallback: "https://c944-154-192-74-22.ngrok-free.app/callstatus",
             statusCallbackMethod: "POST",
             statusCallbackEvent: ['answered', 'ringing', 'completed'],
           });
 
           console.log(`Call initiated successfully to ${phoneNumber}. Call SID: ${call.sid}`);
-          await updateLastCalledAt(phoneNumber, Date.now()); // Update last called time
+          await updateLastCalledAt(phoneNumber, Date.now()); 
           await new Promise(resolve => setTimeout(resolve, 5000));
           const callDetails = await axios.get(`https://api.twilio.com/2010-04-01/Accounts/${process.env.TWILIO_ACCOUNT_SID}/Calls/${call.sid}.json`, {
             auth: {
@@ -334,7 +341,7 @@ const processCalls = async () => {
           from: process.env.TWILIO_PHONE_NUMBER,
           to: phoneNumber.toString(),
           url: "http://demo.twilio.com/docs/voice.xml",
-          statusCallback: "https://your-ngrok-url.ngrok.io/callstatus",
+          statusCallback: "https://a73f-154-192-0-83.ngrok-free.app/callstatus",
           statusCallbackMethod: "POST",
           statusCallbackEvent: ['answered', 'ringing', 'completed'],
         });
@@ -387,7 +394,7 @@ app.post("/add-user", async (req, res) => {
     let existingUser = await User.findOne({ phone });
     if (existingUser) {
       existingUser.status = status;
-      // existingUser.numberOfCall += 1; 
+      existingUser.numberOfCall += 1; 
       existingUser.date = Date.now();
       await existingUser.save();
       res.status(200).json({
@@ -400,6 +407,8 @@ app.post("/add-user", async (req, res) => {
       const newUser = new User({
         phone,
         status,
+        numberOfCall: 0, 
+        date: Date.now(),
       });
       await newUser.save();
       res.status(201).json({
@@ -597,11 +606,6 @@ app.get("/api/call", async (req, res) => {
     });
   }
 });
-
-
-
-
-
 
 // app.post("/log-data", (req, res) => {
 //   console.log("Received data:", req.body);
